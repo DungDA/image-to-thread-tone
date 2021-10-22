@@ -4,13 +4,7 @@ import os
 import sys
 import cv2
 import numpy as np
-
-# local import
-from options.test_options import TestOptions
-from data import create_dataset
-from models import create_model
-from util.visualizer import save_images
-from util import html
+import subprocess
 
 # Parameters
 imgRadius = 500     # Number of pixels that the image radius is resized to
@@ -27,7 +21,9 @@ dataroot = './examples'
 savefolder = './results'
 
 # Apply circular mask to image
-def maskImage(image, radius):
+
+
+def mask_image(image, radius):
     y, x = np.ogrid[-radius:radius + 1, -radius:radius + 1]
     mask = x**2 + y**2 > radius**2
     image[mask] = 0
@@ -35,13 +31,13 @@ def maskImage(image, radius):
 
 
 # Invert grayscale image
-def invertImage(image):
-    return (255-image)
+def invert_image(image):
+    return (255 - image)
 
 
 # Compute coordinates of loom pins
-def pinCoords(radius, numPins=200, offset=0, x0=None, y0=None):
-    alpha = np.linspace(0 + offset, 2*np.pi + offset, numPins + 1)
+def pin_coords(radius, numPins=200, offset=0, x0=None, y0=None):
+    alpha = np.linspace(0 + offset, 2 * np.pi + offset, numPins + 1)
 
     if (x0 == None) or (y0 == None):
         x0 = radius + 1
@@ -49,65 +45,62 @@ def pinCoords(radius, numPins=200, offset=0, x0=None, y0=None):
 
     coords = []
     for angle in alpha[0:-1]:
-        x = int(x0 + radius*np.cos(angle))
-        y = int(y0 + radius*np.sin(angle))
-
+        x = int(x0 + radius * np.cos(angle))
+        y = int(y0 + radius * np.sin(angle))
         coords.append((x, y))
     return coords
 
 
 # Compute a line mask
-def linePixels(pin0, pin1):
+def line_pixels(pin0, pin1):
     length = int(np.hypot(pin1[0] - pin0[0], pin1[1] - pin0[1]))
     x = np.linspace(pin0[0], pin1[0], length)
     y = np.linspace(pin0[1], pin1[1], length)
-    return (x.astype(np.int)-1, y.astype(np.int)-1)
+    return (x.astype(np.int) - 1, y.astype(np.int) - 1)
 
 
-def training_image_to_draw():
-    exp = 'pretrained'
-    imgsize = 512
-    epoch = '200'
-    gpu_id = '0'
-    os.system(
-        'python3 image-to-draw.py --dataroot %s --name %s --model test_3styles --output_nc 1 --no_dropout --num_test 1000 --epoch %s --imagefolder %s --crop_size %d --load_size %d --gpu_ids %s' % (
-            dataroot, exp, epoch, 'images3styles', imgsize, imgsize, gpu_id
-        )
-    )
+def remove_backgroup(inFile):
+    outFilePng = f"/content/{savefolder}/image_nobg.png"
+    outFile = f"/content/{savefolder}/image_nobg.jpg"
+    subprocess.run(f'python /content/remove-background.py -i {inFile} -o {outFilePng} -m ${model_name} -prep {preprocessing} -postp {postprocessing}', shell=True)
+    image = Image.open(outFilePng)
+    new_image = Image.new("RGB", image.size, (255, 255, 255))
+    new_image.paste(image, (0, 0), image)
+    # Convert png to jpg white background
+    new_image = new_image.convert('RGB')
+    new_image.save(outFile)
+    return outFile
 
 
-def convert_to_pins():
-    # Auto find last result
-    imgPath = os.path.join(savefolder, 'pretrained', 'test_200', 'images3styles', 'image_fake3.png')
-
+def convert_to_pins(imgPath):
     # Load image
     image = cv2.imread(imgPath)
     print("[+] loaded " + imgPath + " for threading..")
 
     # Crop image
     height, width = image.shape[0:2]
-    minEdge= min(height, width)
-    topEdge = int((height - minEdge)/2)
-    leftEdge = int((width - minEdge)/2)
-    imgCropped = image[topEdge:topEdge+minEdge, leftEdge:leftEdge+minEdge]
+    minEdge = min(height, width)
+    topEdge = int((height - minEdge) / 2)
+    leftEdge = int((width - minEdge) / 2)
+    imgCropped = image[topEdge:topEdge + minEdge, leftEdge:leftEdge + minEdge]
     cv2.imwrite(os.path.join(savefolder, 'cropped.png'), imgCropped)
 
     # Resize image
-    imgSized = cv2.resize(imgCropped, (2*imgRadius + 1, 2*imgRadius + 1))
+    imgSized = cv2.resize(imgCropped, (2 * imgRadius + 1, 2 * imgRadius + 1))
 
     # Invert image
-    imgInverted = invertImage(imgSized)
+    imgInverted = invert_image(imgSized)
     cv2.imwrite('./inverted.png', imgInverted)
-    imgSized = cv2.resize(imgCropped, (2*imgRadius + 1, 2*imgRadius + 1))
+    imgSized = cv2.resize(imgCropped, (2 * imgRadius + 1, 2 * imgRadius + 1))
 
     # Mask image
-    imgMasked = maskImage(imgInverted, imgRadius)
+    imgMasked = mask_image(imgInverted, imgRadius)
     cv2.imwrite('./masked.png', imgMasked)
 
     print("[+] image preprocessed for threading..")
 
     # Define pin coordinates
-    coords = pinCoords(imgRadius, numPins)
+    coords = pin_coords(imgRadius, numPins)
     height, width = imgMasked.shape[0:2]
 
     # image result is rendered to
@@ -119,7 +112,6 @@ def convert_to_pins():
     previousPins = []
     oldPin = initPin
     lineMask = np.zeros((height, width))
-
     imgResult = 255 * np.ones((height, width))
 
     # Loop over lines until stopping criteria is reached
@@ -131,14 +123,10 @@ def convert_to_pins():
         # Loop over possible lines
         for index in range(1, numPins):
             pin = (oldPin + index) % numPins
-
             coord = coords[pin]
-
-            xLine, yLine = linePixels(oldCoord, coord)
-
+            xLine, yLine = line_pixels(oldCoord, coord)
             # Fitness function
             lineSum = np.sum(imgMasked[yLine, xLine])
-
             if (lineSum > bestLine) and not(pin in previousPins):
                 bestLine = lineSum
                 bestPin = pin
@@ -157,7 +145,7 @@ def convert_to_pins():
         lines.append((oldPin, bestPin))
 
         # plot results
-        xLine, yLine = linePixels(coords[bestPin], coord)
+        xLine, yLine = line_pixels(coords[bestPin], coord)
         imgResult[yLine, xLine] = 0
         # cv2.imshow('image', imgResult)
         # cv2.waitKey(1)
@@ -172,24 +160,25 @@ def convert_to_pins():
         # Print progress
         sys.stdout.write("\b\b")
         sys.stdout.write("\r")
-        sys.stdout.write("[+] Computing line " + str(line + 1) + " of " + str(numLines) + " total")
+        sys.stdout.write("[+] Computing line " +
+                         str(line + 1) + " of " + str(numLines) + " total")
         sys.stdout.flush()
 
     print("\n[+] Image threaded")
-
     # Wait for user and save before exit
     cv2.waitKey(0)
     cv2.destroyAllWindows()
     cv2.imwrite(os.path.join(savefolder, 'threaded.png'), imgResult)
 
     svg_output = open(os.path.join(savefolder, 'threaded.svg'), 'wb')
-    header="""<?xml version="1.0" standalone="no"?>
-    <svg width="%i" height="%i" version="1.1" xmlns="http://www.w3.org/2000/svg">
-    """ % (width, height)
-    footer="</svg>"
+    header = """<?xml version="1.0" standalone="no"?>
+  <svg width="%i" height="%i" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  """ % (width, height)
+    footer = "</svg>"
     svg_output.write(header.encode('utf8'))
-    pather = lambda d : '<path d="%s" stroke="black" stroke-width="0.5" fill="none" />\n' % d
-    pathstrings=[]
+    def pather(
+        d): return '<path d="%s" stroke="black" stroke-width="0.5" fill="none" />\n' % d
+    pathstrings = []
     pathstrings.append("M" + "%i %i" % coords[lines[0][0]] + " ")
     for l in lines:
         nn = coords[l[1]]
@@ -199,20 +188,20 @@ def convert_to_pins():
     svg_output.write(pather(d).encode('utf8'))
     svg_output.write(footer.encode('utf8'))
     svg_output.close()
-
-    csv_output = open(os.path.join(savefolder, 'threaded.csv'),'wb')
+    csv_output = open(os.path.join(savefolder, 'threaded.csv'), 'wb')
     csv_output.write("x1,y1,x2,y2\n".encode('utf8'))
-    csver = lambda c1,c2 : "%i,%i" % c1 + "," + "%i,%i" % c2 + "\n"
+    def csver(c1, c2): return "%i,%i" % c1 + "," + "%i,%i" % c2 + "\n"
     for l in lines:
-        csv_output.write(csver(coords[l[0]],coords[l[1]]).encode('utf8'))
+        csv_output.write(csver(coords[l[0]], coords[l[1]]).encode('utf8'))
     csv_output.close()
 
 
-if __name__=="__main__":
-    print("[#1] Drawing image")
-    training_image_to_draw()
+if __name__ == "__main__":
+    print("[#1] Remove background image")
+    imagePathIn = os.path.join(dataroot, 'image.jpg')
+    imagePathOut = remove_backgroup(imagePathIn)
 
     print("[#2] Convert to pins")
-    convert_to_pins()
+    convert_to_pins(imagePathOut)
 
 sys.exit()
