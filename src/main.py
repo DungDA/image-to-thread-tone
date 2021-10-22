@@ -5,77 +5,26 @@ import sys
 import cv2
 import numpy as np
 
+# local import
+from options.test_options import TestOptions
+from data import create_dataset
+from models import create_model
+from util.visualizer import save_images
+from util import html
+
 # Parameters
 imgRadius = 500     # Number of pixels that the image radius is resized to
 
 initPin = 0         # Initial pin to start threading from
-numPins = 200       # Number of pins on the circular loom
-numLines = 1000     # Maximal number of lines
+numPins = 512       # Number of pins on the circular loom
+numLines = 2048     # Maximal number of lines
 
 minLoop = 3         # Disallow loops of less than minLoop lines
 lineWidth = 3       # The number of pixels that represents the width of a thread
 lineWeight = 15     # The weight a single thread has in terms of "darkness"
 
-helpMessage = """
-To use this tool, run:
-python threadTone.py -p image-path -l number-of-lines-to-draw -n number-of-pins-to-draw-with
-ex: python threadTone.py -p kitten.jpg -l 2000 -n 250
-ex: python threadTone.py -p puppr.png
-Note: imgPath is a required field.
-"""
-args = sys.argv
-
-# \/argument interpreter
-for arg in args:
-    if arg == "-h" or arg == "-?" or arg == "help":
-        print(helpMessage)
-        sys.exit()
-
-argNum = 1
-while argNum < len(args):
-    if args[argNum][0] == "-":
-        flag = args[argNum]
-        if flag == "-p" or flag == "-P":
-            argument = args[argNum + 1]
-            imgPath = args[argNum + 1]
-            argNum += 2
-        elif flag == "-l" or flag == "-L":
-            try:
-                int(args[argNum + 1])
-            except ValueError:
-                print("'" + args[argNum + 1] + "' is not an integer, please input an integer for the number of lines to draw.")
-                sys.exit(1)
-            numLines = int(args[argNum + 1])
-            argNum += 2
-        elif flag == "-n" or flag == "-N":
-            try:
-                int(args[argNum + 1])
-            except ValueError:
-                print("'" + args[argNum + 1] + "' is not an integer, please input an integer for the number of pins.")
-                sys.exit(1)
-            numPins = int(args[argNum + 1])
-            argNum += 2
-        else:
-            print("Invalid flag: " + args[argNum])
-            sys.exit(1)
-    else:
-        print("Invalid flag: " + args[argNum])
-        sys.exit(1)
-
-# main processes
-banner = """
-   __  __                        ________
-  / /_/ /_  ________  ____ _____/ /_  __/___  ____  ___
- / __/ __ \/ ___/ _ \/ __ `/ __  / / / / __ \/ __ \/ _ \\
-/ /_/ / / / /  /  __/ /_/ / /_/ / / / / /_/ / / / /  __/
-\__/_/ /_/_/   \___/\__,_/\__,_/ /_/  \____/_/ /_/\___/
-Build a thread based halftone representation of an image
-(Press: ctrl+c in this terminal window to kill the drawing)
-"""
-
-# Invert grayscale image
-def invertImage(image):
-    return (255-image)
+dataroot = './examples'
+savefolder = './results'
 
 # Apply circular mask to image
 def maskImage(image, radius):
@@ -111,25 +60,22 @@ def linePixels(pin0, pin1):
     return (x.astype(np.int)-1, y.astype(np.int)-1)
 
 
-def prepare():
+def training_image_to_draw():
     exp = 'pretrained'
     imgsize = 512
     epoch = '200'
-    dataroot = './examples'
-    savefolder = './images'    
     gpu_id = '0'
     os.system(
-        'python3 test.py --dataroot %s --name %s --model test_3styles --output_nc 1 --no_dropout --num_test 1000 --epoch %s --imagefolder %s --crop_size %d --load_size %d --gpu_ids %s' % (
-            dataroot, exp, epoch, savefolder, imgsize, imgsize, gpu_id
+        'python3 image-to-draw.py --dataroot %s --name %s --model test_3styles --output_nc 1 --no_dropout --num_test 1000 --epoch %s --imagefolder %s --crop_size %d --load_size %d --gpu_ids %s' % (
+            dataroot, exp, epoch, 'images3styles', imgsize, imgsize, gpu_id
         )
     )
 
-if __name__=="__main__":
-    prepare()
-    exit()
 
+def convert_to_pins():
+    # Auto find last result
+    imgPath = os.path.join(savefolder, 'pretrained', 'test_200', 'images3styles', 'image_fake3.png')
 
-    print(banner)
     # Load image
     image = cv2.imread(imgPath)
     print("[+] loaded " + imgPath + " for threading..")
@@ -140,21 +86,13 @@ if __name__=="__main__":
     topEdge = int((height - minEdge)/2)
     leftEdge = int((width - minEdge)/2)
     imgCropped = image[topEdge:topEdge+minEdge, leftEdge:leftEdge+minEdge]
-    cv2.imwrite('./cropped.png', imgCropped)
-
-    # Convert to grayscale
-    imgGray = cv2.cvtColor(imgCropped, cv2.COLOR_BGR2GRAY)
-    cv2.imwrite('./gray.png', imgGray)
+    cv2.imwrite(os.path.join(savefolder, 'cropped.png'), imgCropped)
 
     # Resize image
-    imgSized = cv2.resize(imgGray, (2*imgRadius + 1, 2*imgRadius + 1))
-
-    # Invert image
-    imgInverted = invertImage(imgSized)
-    cv2.imwrite('./inverted.png', imgInverted)
+    imgSized = cv2.resize(imgCropped, (2*imgRadius + 1, 2*imgRadius + 1))
 
     # Mask image
-    imgMasked = maskImage(imgInverted, imgRadius)
+    imgMasked = maskImage(imgSized, imgRadius)
     cv2.imwrite('./masked.png', imgMasked)
 
     print("[+] image preprocessed for threading..")
@@ -233,9 +171,9 @@ if __name__=="__main__":
     # Wait for user and save before exit
     cv2.waitKey(0)
     cv2.destroyAllWindows()
-    cv2.imwrite('./threaded.png', imgResult)
+    cv2.imwrite(os.path.join(savefolder, 'threaded.png'), imgResult)
 
-    svg_output = open('threaded.svg','wb')
+    svg_output = open(os.path.join(savefolder, 'threaded.svg'), 'wb')
     header="""<?xml version="1.0" standalone="no"?>
     <svg width="%i" height="%i" version="1.1" xmlns="http://www.w3.org/2000/svg">
     """ % (width, height)
@@ -253,11 +191,19 @@ if __name__=="__main__":
     svg_output.write(footer.encode('utf8'))
     svg_output.close()
 
-    csv_output = open('threaded.csv','wb')
+    csv_output = open(os.path.join(savefolder, 'threaded.csv'),'wb')
     csv_output.write("x1,y1,x2,y2\n".encode('utf8'))
     csver = lambda c1,c2 : "%i,%i" % c1 + "," + "%i,%i" % c2 + "\n"
     for l in lines:
         csv_output.write(csver(coords[l[0]],coords[l[1]]).encode('utf8'))
     csv_output.close()
+
+
+if __name__=="__main__":
+    print("[#1] Drawing image " + imgPath)
+    training_image_to_draw()
+
+    print("[#2] Convert to pins " + imgPath)
+    convert_to_pins()
 
 sys.exit()
