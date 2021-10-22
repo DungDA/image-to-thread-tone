@@ -200,10 +200,10 @@ def convert_to_pins():
 
 
 if __name__=="__main__":
-    print("[#1] Drawing image " + imgPath)
+    print("[#1] Drawing image")
     training_image_to_draw()
 
-    print("[#2] Convert to pins " + imgPath)
+    print("[#2] Convert to pins")
     convert_to_pins()
 
 sys.exit()
