@@ -31,8 +31,13 @@ def maskImage(image, radius):
     y, x = np.ogrid[-radius:radius + 1, -radius:radius + 1]
     mask = x**2 + y**2 > radius**2
     image[mask] = 0
-
     return image
+
+
+# Invert grayscale image
+def invertImage(image):
+    return (255-image)
+
 
 # Compute coordinates of loom pins
 def pinCoords(radius, numPins=200, offset=0, x0=None, y0=None):
@@ -50,13 +55,12 @@ def pinCoords(radius, numPins=200, offset=0, x0=None, y0=None):
         coords.append((x, y))
     return coords
 
+
 # Compute a line mask
 def linePixels(pin0, pin1):
     length = int(np.hypot(pin1[0] - pin0[0], pin1[1] - pin0[1]))
-
     x = np.linspace(pin0[0], pin1[0], length)
     y = np.linspace(pin0[1], pin1[1], length)
-
     return (x.astype(np.int)-1, y.astype(np.int)-1)
 
 
@@ -91,8 +95,13 @@ def convert_to_pins():
     # Resize image
     imgSized = cv2.resize(imgCropped, (2*imgRadius + 1, 2*imgRadius + 1))
 
+    # Invert image
+    imgInverted = invertImage(imgSized)
+    cv2.imwrite('./inverted.png', imgInverted)
+    imgSized = cv2.resize(imgCropped, (2*imgRadius + 1, 2*imgRadius + 1))
+
     # Mask image
-    imgMasked = maskImage(imgSized, imgRadius)
+    imgMasked = maskImage(imgInverted, imgRadius)
     cv2.imwrite('./masked.png', imgMasked)
 
     print("[+] image preprocessed for threading..")
